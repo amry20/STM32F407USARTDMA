@@ -153,146 +153,146 @@ void USART_ErrorCallback(UART_HandleTypeDef *huart) {
     }
 }
 
-// DMA Interrupt Handlers for USART1
+// DMA Interrupt Handlers for USART1 - Optimized
 extern "C" void DMA2_Stream7_IRQHandler(void) {
-    // USART1 TX DMA (DMA2_Stream7)
-    if (DMA2->HISR & DMA_HISR_TCIF7) {
-        // Clear ALL DMA flags
-        DMA2->HIFCR = DMA_HIFCR_CTCIF7 | DMA_HIFCR_CTEIF7 | DMA_HIFCR_CDMEIF7 | DMA_HIFCR_CFEIF7;
+    // USART1 TX DMA (DMA2_Stream7) - Check only TC flag for minimal overhead
+    uint32_t hisr = DMA2->HISR;
+    if (hisr & DMA_HISR_TCIF7) {
+        // Clear ALL flags at once (pre-computed constant)
+        DMA2->HIFCR = DMA2_STREAM7_CLEAR_FLAGS;
         
-        // Disable DMA completely
+        // Fast DMA and USART disable (combined operations)
         DMA2_Stream7->CR = 0;
-        
-        // Disable USART DMA
         USART1->CR3 &= ~USART_CR3_DMAT;
         
-        // Mark transmission as complete
-        if (g_usart_instances[0]) {
-            g_usart_instances[0]->setTxBusy(false);
+        // Optimized instance access with null check
+        USARTClass* instance = g_usart_instances[0];
+        if (instance) {
+            instance->txBusy = false;  // Direct access instead of function call
             
-            // Auto-start next transmission if FIFO has data
-            g_usart_instances[0]->processTransmission();
+            // Only process if FIFO has sufficient data (reduce overhead)
+            if (instance->fifoCount >= TX_THRESHOLD) {
+                instance->processTransmission();
+            }
         }
     }
 }
 
 extern "C" void DMA2_Stream2_IRQHandler(void) {
-    // USART1 RX DMA (DMA2_Stream2)
-    uint32_t isr = DMA2->LISR;
+    // USART1 RX DMA (DMA2_Stream2) - Optimized flag checking
+    uint32_t lisr = DMA2->LISR;
+    USARTClass* instance = g_usart_instances[0];
     
-    // Transfer Complete (TC) - full buffer processed
-    if (isr & DMA_LISR_TCIF2) {
-        DMA2->LIFCR = DMA_LIFCR_CTCIF2;  // Clear TC flag
-        
-        if (g_usart_instances[0]) {
-            g_usart_instances[0]->handleRxComplete();
-        }
+    if (!instance) return;  // Early exit if no instance
+    
+    // Handle Transfer Complete with minimal overhead
+    if (lisr & DMA_LISR_TCIF2) {
+        DMA2->LIFCR = DMA_LIFCR_CTCIF2;
+        instance->rxHead = RX_BUFFER_SIZE;  // Direct assignment
     }
     
-    // Half Transfer (HT) - half buffer processed  
-    if (isr & DMA_LISR_HTIF2) {
-        DMA2->LIFCR = DMA_LIFCR_CHTIF2;  // Clear HT flag
-        
-        if (g_usart_instances[0]) {
-            g_usart_instances[0]->handleRxHalfComplete();
-        }
+    // Handle Half Transfer with minimal overhead
+    if (lisr & DMA_LISR_HTIF2) {
+        DMA2->LIFCR = DMA_LIFCR_CHTIF2;
+        instance->rxHead = RX_BUFFER_SIZE / 2;  // Direct assignment
     }
     
-    // Transfer Error (TE)
-    if (isr & DMA_LISR_TEIF2) {
-        DMA2->LIFCR = DMA_LIFCR_CTEIF2;  // Clear TE flag
-        // Handle error if needed
-        if (g_usart_instances[0]) {
-            // Error handling will be done in class method
-        }
+    // Handle Transfer Error (minimal processing)
+    if (lisr & DMA_LISR_TEIF2) {
+        DMA2->LIFCR = DMA_LIFCR_CTEIF2;
+        instance->errorCount++;  // Direct increment
     }
 }
 
-// DMA Interrupt Handlers for USART2
+// DMA Interrupt Handlers for USART2 - Optimized
 extern "C" void DMA1_Stream6_IRQHandler(void) {
-    // USART2 TX DMA (DMA1_Stream6)
-    if (DMA1->HISR & DMA_HISR_TCIF6) {
-        // Clear ALL DMA flags
-        DMA1->HIFCR = DMA_HIFCR_CTCIF6 | DMA_HIFCR_CTEIF6 | DMA_HIFCR_CDMEIF6 | DMA_HIFCR_CFEIF6;
+    // USART2 TX DMA (DMA1_Stream6) - Optimized version
+    uint32_t hisr = DMA1->HISR;
+    if (hisr & DMA_HISR_TCIF6) {
+        // Clear ALL flags at once
+        DMA1->HIFCR = DMA1_STREAM6_CLEAR_FLAGS;
         
-        // Disable DMA completely
+        // Fast disable operations
         DMA1_Stream6->CR = 0;
-        
-        // Disable USART DMA
         USART2->CR3 &= ~USART_CR3_DMAT;
         
-        // Mark transmission as complete
-        if (g_usart_instances[1]) {
-            g_usart_instances[1]->setTxBusy(false);
-            g_usart_instances[1]->processTransmission();
+        // Optimized instance access
+        USARTClass* instance = g_usart_instances[1];
+        if (instance) {
+            instance->txBusy = false;
+            if (instance->fifoCount >= TX_THRESHOLD) {
+                instance->processTransmission();
+            }
         }
     }
 }
 
 extern "C" void DMA1_Stream5_IRQHandler(void) {
-    // USART2 RX DMA (DMA1_Stream5)
-    uint32_t isr = DMA1->HISR;
+    // USART2 RX DMA (DMA1_Stream5) - Optimized version
+    uint32_t hisr = DMA1->HISR;
+    USARTClass* instance = g_usart_instances[1];
     
-    if (isr & DMA_HISR_TCIF5) {
+    if (!instance) return;
+    
+    if (hisr & DMA_HISR_TCIF5) {
         DMA1->HIFCR = DMA_HIFCR_CTCIF5;
-        if (g_usart_instances[1]) {
-            g_usart_instances[1]->handleRxComplete();
-        }
+        instance->rxHead = RX_BUFFER_SIZE;
     }
     
-    if (isr & DMA_HISR_HTIF5) {
+    if (hisr & DMA_HISR_HTIF5) {
         DMA1->HIFCR = DMA_HIFCR_CHTIF5;
-        if (g_usart_instances[1]) {
-            g_usart_instances[1]->handleRxHalfComplete();
-        }
+        instance->rxHead = RX_BUFFER_SIZE / 2;
     }
     
-    if (isr & DMA_HISR_TEIF5) {
+    if (hisr & DMA_HISR_TEIF5) {
         DMA1->HIFCR = DMA_HIFCR_CTEIF5;
+        instance->errorCount++;
     }
 }
 
-// DMA Interrupt Handlers for USART3
+// DMA Interrupt Handlers for USART3 - Optimized
 extern "C" void DMA1_Stream3_IRQHandler(void) {
-    // USART3 TX DMA (DMA1_Stream3)
-    if (DMA1->LISR & DMA_LISR_TCIF3) {
-        // Clear ALL DMA flags
-        DMA1->LIFCR = DMA_LIFCR_CTCIF3 | DMA_LIFCR_CTEIF3 | DMA_LIFCR_CDMEIF3 | DMA_LIFCR_CFEIF3;
+    // USART3 TX DMA (DMA1_Stream3) - Optimized version
+    uint32_t lisr = DMA1->LISR;
+    if (lisr & DMA_LISR_TCIF3) {
+        // Clear ALL flags at once
+        DMA1->LIFCR = DMA1_STREAM3_CLEAR_FLAGS;
         
-        // Disable DMA completely
+        // Fast disable operations
         DMA1_Stream3->CR = 0;
-        
-        // Disable USART DMA
         USART3->CR3 &= ~USART_CR3_DMAT;
         
-        // Mark transmission as complete
-        if (g_usart_instances[2]) {
-            g_usart_instances[2]->setTxBusy(false);
-            g_usart_instances[2]->processTransmission();
+        // Optimized instance access
+        USARTClass* instance = g_usart_instances[2];
+        if (instance) {
+            instance->txBusy = false;
+            if (instance->fifoCount >= TX_THRESHOLD) {
+                instance->processTransmission();
+            }
         }
     }
 }
 
 extern "C" void DMA1_Stream1_IRQHandler(void) {
-    // USART3 RX DMA (DMA1_Stream1)
-    uint32_t isr = DMA1->LISR;
+    // USART3 RX DMA (DMA1_Stream1) - Optimized version
+    uint32_t lisr = DMA1->LISR;
+    USARTClass* instance = g_usart_instances[2];
     
-    if (isr & DMA_LISR_TCIF1) {
+    if (!instance) return;
+    
+    if (lisr & DMA_LISR_TCIF1) {
         DMA1->LIFCR = DMA_LIFCR_CTCIF1;
-        if (g_usart_instances[2]) {
-            g_usart_instances[2]->handleRxComplete();
-        }
+        instance->rxHead = RX_BUFFER_SIZE;
     }
     
-    if (isr & DMA_LISR_HTIF1) {
+    if (lisr & DMA_LISR_HTIF1) {
         DMA1->LIFCR = DMA_LIFCR_CHTIF1;
-        if (g_usart_instances[2]) {
-            g_usart_instances[2]->handleRxHalfComplete();
-        }
+        instance->rxHead = RX_BUFFER_SIZE / 2;
     }
     
-    if (isr & DMA_LISR_TEIF1) {
+    if (lisr & DMA_LISR_TEIF1) {
         DMA1->LIFCR = DMA_LIFCR_CTEIF1;
+        instance->errorCount++;
     }
 }
 
@@ -456,132 +456,129 @@ size_t USARTClass::write(uint8_t data){
     return 0;
 }
 size_t USARTClass::WriteBytes(uint8_t *data, size_t len) {
-    if (len == 0) return 0;
+    if (UNLIKELY(len == 0)) return 0;
     
-    // Calculate available space in FIFO
+    // Fast check without disabling interrupts first
     size_t available = FIFO_SIZE - this->fifoCount;
+    if (UNLIKELY(available == 0)) return 0; // Quick exit if FIFO full
+    
     size_t toWrite = (len > available) ? available : len;
     
-    if (toWrite == 0) return 0; // FIFO full
-    
-    // Disable interrupts for atomic FIFO operations
+    // Single atomic section for entire FIFO operation
+    uint32_t primask = __get_PRIMASK();
     __disable_irq();
     
-    // Optimized bulk write to FIFO
-    if (this->fifoHead + toWrite <= FIFO_SIZE) {
-        // No wrapping - single fast memcpy
-        memcpy(&this->fifoBuffer[this->fifoHead], data, toWrite);
-        this->fifoHead = (this->fifoHead + toWrite) & FIFO_MASK;  // Fast bitwise AND
+    // Optimized bulk write to FIFO with branch prediction optimization
+    uint16_t head = this->fifoHead;
+    if (LIKELY(head + toWrite <= FIFO_SIZE)) {
+        // Common case: No wrapping - single fast memcpy
+        memcpy(&this->fifoBuffer[head], data, toWrite);
+        this->fifoHead = (head + toWrite) & FIFO_MASK;
     } else {
-        // Wrapping case - two memcpy operations
-        size_t firstPart = FIFO_SIZE - this->fifoHead;
+        // Less common case: Wrapping - two memcpy operations
+        size_t firstPart = FIFO_SIZE - head;
         size_t secondPart = toWrite - firstPart;
         
-        memcpy(&this->fifoBuffer[this->fifoHead], data, firstPart);
+        memcpy(&this->fifoBuffer[head], data, firstPart);
         memcpy(&this->fifoBuffer[0], &data[firstPart], secondPart);
         
-        this->fifoHead = secondPart;  // Already within bounds
+        this->fifoHead = secondPart;
     }
     
-    // Bulk update count
+    // Update count atomically
     this->fifoCount += toWrite;
     
-    __enable_irq();
+    __set_PRIMASK(primask);
     
-    // Try to start transmission if DMA is idle
-    processTransmission();
+    // Try to start transmission if DMA is idle (outside critical section)
+    if (LIKELY(!this->txBusy && this->fifoCount >= TX_THRESHOLD)) {
+        processTransmission();
+    }
     
     return toWrite;
 }
 
-// Process FIFO and start DMA transmission if needed
+// Process FIFO and start DMA transmission if needed - Optimized
 void USARTClass::processTransmission() {
-    // Skip if DMA is busy or FIFO is empty
-    if (this->txBusy || this->fifoCount == 0) {
+    // Fast exit checks without critical section
+    if (UNLIKELY(this->txBusy)) return;
+    
+    uint16_t currentCount = this->fifoCount;
+    if (UNLIKELY(currentCount < TX_THRESHOLD)) return;
+    
+    // Determine how many bytes to send (up to DMA_CHUNK_SIZE)
+    uint16_t bytesToSend = (currentCount > DMA_CHUNK_SIZE) ? DMA_CHUNK_SIZE : currentCount;
+    
+    // Single atomic section for FIFO read
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    
+    // Re-check after disabling interrupts (race condition protection)
+    if (UNLIKELY(this->txBusy || this->fifoCount < bytesToSend)) {
+        __set_PRIMASK(primask);
         return;
     }
     
-    // Start DMA transmission whenever there's data (simplified logic)
-    // Determine how many bytes to send (up to DMA_CHUNK_SIZE)
-    uint16_t bytesToSend = (this->fifoCount > DMA_CHUNK_SIZE) ? DMA_CHUNK_SIZE : this->fifoCount;
-    
-    // Disable interrupts for atomic FIFO read
-    __disable_irq();
-    
-    // Optimized FIFO copy - handle circular buffer efficiently
-    if (this->fifoTail + bytesToSend <= FIFO_SIZE) {
-        // No wrapping - single fast memcpy
-        memcpy(this->txBuffer, &this->fifoBuffer[this->fifoTail], bytesToSend);
-        this->fifoTail = (this->fifoTail + bytesToSend) & FIFO_MASK;  // Fast bitwise AND instead of modulo
+    // Optimized FIFO copy with branch prediction
+    uint16_t tail = this->fifoTail;
+    if (LIKELY(tail + bytesToSend <= FIFO_SIZE)) {
+        // Common case: No wrapping
+        memcpy(this->txBuffer, &this->fifoBuffer[tail], bytesToSend);
+        this->fifoTail = (tail + bytesToSend) & FIFO_MASK;
     } else {
-        // Wrapping case - two memcpy operations
-        uint16_t firstPart = FIFO_SIZE - this->fifoTail;
+        // Less common case: Wrapping
+        uint16_t firstPart = FIFO_SIZE - tail;
         uint16_t secondPart = bytesToSend - firstPart;
         
-        memcpy(this->txBuffer, &this->fifoBuffer[this->fifoTail], firstPart);
+        memcpy(this->txBuffer, &this->fifoBuffer[tail], firstPart);
         memcpy(&this->txBuffer[firstPart], &this->fifoBuffer[0], secondPart);
         
         this->fifoTail = secondPart;
     }
     
-    // Bulk update count
+    // Update count and set busy flag atomically
     this->fifoCount -= bytesToSend;
+    this->txBusy = true;
     
-    __enable_irq();
+    __set_PRIMASK(primask);
     
-    // Start DMA transmission
+    // Start DMA transmission (outside critical section)
     startDmaTransmission(bytesToSend);
 }
 
-// Start DMA transmission with specified length
+// Start DMA transmission with specified length - Optimized
 void USARTClass::startDmaTransmission(uint16_t len) {
-    if (this->config == nullptr) return;
+    if (!this->config) return;
     
-    // Get the correct DMA stream and USART register
     DMA_Stream_TypeDef* dma_stream = this->config->dma_tx_stream;
     USART_TypeDef* usart_reg = this->uart;
     
-    // COMPLETE DMA RESET before configuration with timeout
-    dma_stream->CR = 0; // Disable DMA
-    uint32_t timeout = 1000;
-    while ((dma_stream->CR & DMA_SxCR_EN) && timeout--) {
-        // Wait for DMA to be completely disabled
-    }
+    // Fast DMA disable without timeout (trust hardware)
+    dma_stream->CR = 0;
     
-    if (timeout == 0) {
-        // DMA stuck - abort and increment error
-        this->txBusy = false;
-        this->errorCount++;
-        return;
-    }
-    
-    // Clear all flags - optimized with pre-computed values
+    // Optimized flag clearing using pre-computed constants
     if (dma_stream == DMA2_Stream7) {
         DMA2->HIFCR = DMA2_STREAM7_CLEAR_FLAGS;
     } else if (dma_stream == DMA1_Stream6) {
         DMA1->HIFCR = DMA1_STREAM6_CLEAR_FLAGS;
-    } else if (dma_stream == DMA1_Stream3) {
+    } else { // DMA1_Stream3
         DMA1->LIFCR = DMA1_STREAM3_CLEAR_FLAGS;
     }
     
-    // Disable USART DMA first
+    // Disable USART DMA before configuration
     usart_reg->CR3 &= ~USART_CR3_DMAT;
-
-    // Configure DMA Stream
-    dma_stream->PAR = (uint32_t)&(usart_reg->DR); // Peripheral address
-    dma_stream->M0AR = (uint32_t)this->txBuffer; // Memory address
-    dma_stream->NDTR = len; // Number of data
     
-    // Configure DMA control register (optimized with pre-computed base)
+    // Optimized DMA configuration with minimal register writes
+    dma_stream->PAR = (uint32_t)&(usart_reg->DR);
+    dma_stream->M0AR = (uint32_t)this->txBuffer;
+    dma_stream->NDTR = len;
+    
+    // Single write to control register with pre-computed value
     dma_stream->CR = this->config->dma_channel | DMA_CR_BASE;
     
-    // Enable USART DMA TX
+    // Enable USART DMA and start DMA in single operation
     usart_reg->CR3 |= USART_CR3_DMAT;
-    
-    // Start DMA
     dma_stream->CR |= DMA_SxCR_EN;
-    
-    this->txBusy = true;
 }
 
 // Fungsi untuk cek status DMA
@@ -637,11 +634,13 @@ size_t USARTClass::printf(const char* format, ...) {
 }
 
 void USARTClass::flushFifo() {
+    // Optimize with single atomic operation
+    uint32_t primask = __get_PRIMASK();
     __disable_irq();
     this->fifoHead = 0;
     this->fifoTail = 0;
     this->fifoCount = 0;
-    __enable_irq();
+    __set_PRIMASK(primask);
 }
 
 // Force transmit remaining data (ignore threshold for immediate send)
@@ -713,40 +712,60 @@ void USARTClass::handleRxHalfComplete() {
     this->rxHead = RX_BUFFER_SIZE / 2;
 }
 
-// Calculate number of bytes available to read
+// Calculate number of bytes available to read - Optimized
 int USARTClass::available() {
-    if (this->config == nullptr) return 0;
+    if (UNLIKELY(!this->config)) return 0;
     
-    // Atomic read to prevent race condition with DMA
+    // Single atomic read of DMA position
+    uint32_t primask = __get_PRIMASK();
     __disable_irq();
     uint16_t dmaRemaining = (uint16_t)this->config->dma_rx_stream->NDTR;
-    uint16_t rxTailCopy = this->rxTail;
-    __enable_irq();
+    uint16_t rxTailLocal = this->rxTail;
+    __set_PRIMASK(primask);
     
+    // Calculate current DMA write position
     uint16_t currentPos = RX_BUFFER_SIZE - dmaRemaining;
     
-    // Calculate available bytes with proper wrap-around handling
-    int available_bytes;
-    if (currentPos >= rxTailCopy) {
-        available_bytes = currentPos - rxTailCopy;
+    // Fast available calculation with optimized branch
+    if (LIKELY(currentPos >= rxTailLocal)) {
+        return currentPos - rxTailLocal;
     } else {
-        available_bytes = (RX_BUFFER_SIZE - rxTailCopy) + currentPos;
+        return (RX_BUFFER_SIZE - rxTailLocal) + currentPos;
     }
-    
-    return available_bytes;
 }
 
-// Read single byte from RX buffer
+// Read single byte from RX buffer - Optimized
 int USARTClass::read() {
-    if (available() == 0) {
-        return -1;  // No data available
+    // Fast available check without critical section first
+    if (!this->config) return -1;
+    
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    
+    // Get current DMA position and check availability
+    uint16_t dmaRemaining = (uint16_t)this->config->dma_rx_stream->NDTR;
+    uint16_t currentPos = RX_BUFFER_SIZE - dmaRemaining;
+    uint16_t tail = this->rxTail;
+    
+    // Quick availability check
+    bool hasData = (currentPos != tail);
+    if (!hasData) {
+        // Handle wrap-around case
+        if (currentPos < tail) {
+            hasData = true;
+        }
     }
     
-    // Atomic read and update
-    __disable_irq();
-    uint8_t data = this->rxBuffer[this->rxTail];
-    this->rxTail = (this->rxTail + 1) % RX_BUFFER_SIZE;
-    __enable_irq();
+    if (!hasData) {
+        __set_PRIMASK(primask);
+        return -1;
+    }
+    
+    // Read data and update tail atomically
+    uint8_t data = this->rxBuffer[tail];
+    this->rxTail = (tail + 1) % RX_BUFFER_SIZE;
+    
+    __set_PRIMASK(primask);
     
     return data;
 }
@@ -760,28 +779,69 @@ int USARTClass::peek() {
     return this->rxBuffer[this->rxTail];
 }
 
-// Read multiple bytes from RX buffer
+// Read multiple bytes from RX buffer - Optimized
 size_t USARTClass::readBytes(uint8_t* buffer, size_t length) {
+    if (!buffer || !length || !this->config) return 0;
+    
     size_t bytesRead = 0;
     
-    while (bytesRead < length && available() > 0) {
-        int data = read();
-        if (data == -1) break;
+    // Use optimized bulk read when possible
+    while (bytesRead < length) {
+        // Check if we have data available efficiently
+        uint32_t primask = __get_PRIMASK();
+        __disable_irq();
         
-        buffer[bytesRead] = (uint8_t)data;
-        bytesRead++;
+        uint16_t dmaRemaining = (uint16_t)this->config->dma_rx_stream->NDTR;
+        uint16_t currentPos = RX_BUFFER_SIZE - dmaRemaining;
+        uint16_t tail = this->rxTail;
+        
+        // Calculate available bytes for bulk copy
+        uint16_t available_now;
+        if (currentPos >= tail) {
+            available_now = currentPos - tail;
+        } else {
+            available_now = (RX_BUFFER_SIZE - tail) + currentPos;
+        }
+        
+        if (available_now == 0) {
+            __set_PRIMASK(primask);
+            break;  // No more data
+        }
+        
+        // Determine how much to copy in this iteration
+        size_t toCopy = (length - bytesRead > available_now) ? available_now : (length - bytesRead);
+        
+        // Optimized bulk copy handling wrap-around
+        if (tail + toCopy <= RX_BUFFER_SIZE) {
+            // No wrap - single memcpy
+            memcpy(&buffer[bytesRead], &this->rxBuffer[tail], toCopy);
+            this->rxTail = (tail + toCopy) % RX_BUFFER_SIZE;
+        } else {
+            // Wrap case - two memcpy operations
+            size_t firstPart = RX_BUFFER_SIZE - tail;
+            size_t secondPart = toCopy - firstPart;
+            
+            memcpy(&buffer[bytesRead], &this->rxBuffer[tail], firstPart);
+            memcpy(&buffer[bytesRead + firstPart], &this->rxBuffer[0], secondPart);
+            this->rxTail = secondPart;
+        }
+        
+        __set_PRIMASK(primask);
+        
+        bytesRead += toCopy;
     }
     
     return bytesRead;
 }
 
-// Flush RX buffer
+// Flush RX buffer - Optimized
 void USARTClass::flushRx() {
-    if (this->config == nullptr) return;
+    if (!this->config) return;
     
+    uint32_t primask = __get_PRIMASK();
     __disable_irq();
     
-    // Get current DMA position and reset tail to it
+    // Get current DMA position and reset pointers atomically
     uint16_t dmaRemaining = (uint16_t)this->config->dma_rx_stream->NDTR;
     uint16_t currentPos = RX_BUFFER_SIZE - dmaRemaining;
     
@@ -789,7 +849,7 @@ void USARTClass::flushRx() {
     this->rxTail = currentPos;
     this->rxOverflow = 0;
     
-    __enable_irq();
+    __set_PRIMASK(primask);
 }
 
 // Read string until terminator character

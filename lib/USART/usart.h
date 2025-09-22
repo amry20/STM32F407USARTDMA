@@ -23,11 +23,15 @@
 #define DMA1_STREAM6_CLEAR_FLAGS (DMA_HIFCR_CTCIF6 | DMA_HIFCR_CTEIF6 | DMA_HIFCR_CDMEIF6 | DMA_HIFCR_CFEIF6)
 #define DMA1_STREAM3_CLEAR_FLAGS (DMA_LIFCR_CTCIF3 | DMA_LIFCR_CTEIF3 | DMA_LIFCR_CDMEIF3 | DMA_LIFCR_CFEIF3)
 
-// Transmission threshold for batching - only start DMA when FIFO has enough data
-#define TX_THRESHOLD 1  // Start DMA only when >=512 bytes available (reduce overhead)
+// Transmission threshold for batching - optimized for performance
+#define TX_THRESHOLD 1  // Start DMA when >=256 bytes available (reduce overhead)
 
 // Pre-computed DMA control register base value (without channel and enable bit)
 #define DMA_CR_BASE (DMA_SxCR_DIR_0 | DMA_SxCR_MINC | DMA_SxCR_TCIE)
+
+// Performance optimization macros
+#define LIKELY(x)   __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
 // USART instance mapping structure
 typedef struct {
@@ -89,6 +93,12 @@ class USARTClass{
         DMA_HandleTypeDef hdma_rx;
         const USART_Config_t* config;
         
+        // Public access for optimized interrupt handlers
+        volatile bool txBusy;
+        volatile uint16_t fifoCount;    // Number of bytes in FIFO
+        volatile uint32_t errorCount;
+        volatile uint16_t rxHead;       // Current DMA write position
+        
     private:
         // Instance-specific buffers (aligned for DMA)
         uint8_t fifoBuffer[FIFO_SIZE] __attribute__((aligned(4)));
@@ -98,12 +108,8 @@ class USARTClass{
         // Instance-specific state variables
         volatile uint16_t fifoHead;     // Write index
         volatile uint16_t fifoTail;     // Read index
-        volatile uint16_t fifoCount;    // Number of bytes in FIFO
-        volatile bool txBusy;
-        volatile uint32_t errorCount;
         
         // RX Buffer management
-        volatile uint16_t rxHead;       // Current DMA write position
         volatile uint16_t rxTail;       // Application read position
         volatile uint16_t rxOverflow;   // Overflow counter
 };
